@@ -7,7 +7,46 @@ import Button from '../ui/Button';
 import ItemControl from './ItemControl';
 
 // Client-side code only, avoid server-side execution
-let fabric: any = null;
+interface FabricStatic {
+  Canvas: any;
+  Image: {
+    fromURL: (url: string, callback: (img: FabricImage) => void) => void;
+  };
+  Text: any;
+}
+
+interface FabricImage {
+  width?: number;
+  height?: number;
+  scaleToWidth: (width: number) => void;
+  scaleToHeight: (height: number) => void;
+  getScaledWidth: () => number;
+  getScaledHeight: () => number;
+  left: number;
+  top: number;
+}
+
+interface FabricCanvas {
+  add: (...objects: any[]) => void;
+  getObjects: () => FabricObject[];
+  setBackgroundColor: (color: string, callback: () => void) => void;
+  renderAll: () => void;
+  dispose: () => void;
+}
+
+interface FabricObject {
+  type: string;
+  left?: number;
+  top?: number;
+  set: (options: any) => void;
+}
+
+interface FabricText extends FabricObject {
+  text: string;
+}
+
+// Client-side code only, avoid server-side execution
+let fabric: FabricStatic | null = null;
 
 interface StarterPackEditorProps {
   initialTemplate?: {
@@ -29,7 +68,7 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
     background: 'white'
   });
 
-  const canvasRef = useRef<any>(null);
+  const canvasRef = useRef<FabricCanvas | null>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [fabricLoaded, setFabricLoaded] = useState(false);
   const [canvasInitialized, setCanvasInitialized] = useState(false);
@@ -43,7 +82,7 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js';
     script.async = true;
     script.onload = () => {
-      // @ts-ignore
+      // @ts-expect-error fabric.js 全局作用域未定义在类型中
       fabric = window.fabric;
       setFabricLoaded(true);
     };
@@ -74,6 +113,8 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
         }
         
         try {
+          if (!fabric) return; // 再次检查 fabric 是否为空
+          
           const canvas = new fabric.Canvas('meme-canvas', {
             width: 800,
             height: 800,
@@ -91,7 +132,7 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
     } catch (error) {
       console.error('Error setting up canvas:', error);
     }
-  }, [fabricLoaded]);
+  }, [fabricLoaded, editorState.background]);
 
   // 更新背景颜色
   useEffect(() => {
@@ -106,7 +147,7 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
     } catch (error) {
       console.error('Error updating background:', error);
     }
-  }, [editorState.background, canvasInitialized]);
+  }, [canvasInitialized, editorState.background]);
 
   // 处理添加图片
   const handleAddImage = (index: number, file: File) => {
@@ -116,7 +157,9 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
     reader.onload = (e) => {
       if (e.target?.result) {
         try {
-          fabric.Image.fromURL(e.target.result.toString(), (img: any) => {
+          if (!fabric) return; // 再次检查 fabric 是否为空
+          
+          fabric.Image.fromURL(e.target.result.toString(), (img: FabricImage) => {
             // 调整图片大小和位置
             const maxSize = 200;
             if (img.width && img.height) {
@@ -194,7 +237,7 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
     if (canvasRef.current && canvasInitialized) {
       try {
         const objects = canvasRef.current.getObjects();
-        const textObjects = objects.filter((obj: any) => obj.type === 'text');
+        const textObjects = objects.filter((obj: FabricObject) => obj.type === 'text');
         
         // 找到对应位置的文本对象
         const gridSize = 3;
@@ -206,7 +249,8 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
               obj.left && obj.top && 
               Math.floor(obj.left / (800/gridSize)) === col &&
               Math.floor(obj.top / (800/gridSize)) === row) {
-            (obj as any).set({
+            const textObj = obj as FabricText;
+            textObj.set({
               text: caption || 'Add text description'
             });
             break;
@@ -226,6 +270,8 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
     
     try {
       // 添加标题和副标题
+      if (!fabric) return; // 再次检查 fabric 是否为空
+
       const title = new fabric.Text(editorState.title, {
         top: 30,
         left: 400,
@@ -248,23 +294,43 @@ const StarterPackEditor: React.FC<StarterPackEditorProps> = ({ initialTemplate }
       });
       
       canvasRef.current.add(title, subtitle);
-      canvasRef.current.renderAll();
       
-      // 生成图片并下载
-      const dataURL = canvasRef.current.toDataURL({
-        format: 'png',
-        quality: 1
+      // 添加水印
+      const watermark = new fabric.Text('Generated by StarterPackMeme.com', {
+        top: 780,
+        left: 400,
+        fontFamily: 'Arial',
+        fontSize: 14,
+        fill: editorState.background === 'black' ? '#555555' : '#aaaaaa',
+        textAlign: 'center',
+        originX: 'center'
       });
       
-      const link = document.createElement('a');
-      link.download = `starter-pack-${Date.now()}.png`;
-      link.href = dataURL;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      canvasRef.current.add(watermark);
+      canvasRef.current.renderAll();
       
-      // 移除标题和副标题
-      canvasRef.current.remove(title, subtitle);
+      // 生成图片
+      if ('toDataURL' in canvasRef.current) {
+        // 确保 canvas 有 toDataURL 方法
+        const dataUrl = (canvasRef.current as any).toDataURL({
+          format: 'png',
+          quality: 1
+        });
+        
+        // 创建下载链接
+        const link = document.createElement('a');
+        link.download = 'starter-pack-meme.png';
+        link.href = dataUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // 移除标题、副标题和水印
+        if ('remove' in canvasRef.current) {
+          (canvasRef.current as any).remove(title, subtitle, watermark);
+        }
+        canvasRef.current.renderAll();
+      }
     } catch (error) {
       console.error('Error generating image:', error);
     }

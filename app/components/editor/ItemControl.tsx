@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef } from 'react';
+import Image from 'next/image';
 import { StarterPackItem } from '@/app/types';
 
 interface ItemControlProps {
@@ -56,10 +57,12 @@ const ItemControl: React.FC<ItemControlProps> = ({
           
           {item.imageUrl && (
             <div className="mt-2 relative h-20 rounded-md overflow-hidden">
-              <img
+              <Image
                 src={item.imageUrl}
                 alt={`Item ${index + 1}`}
                 className="w-full h-full object-cover"
+                width={80}
+                height={80}
               />
             </div>
           )}
